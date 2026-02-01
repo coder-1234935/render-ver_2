@@ -42,7 +42,7 @@ def encrypt_data(data):
 
 # --- AGENT COMMAND & CONTROL ---
 
-@from urllib.parse import parse_qs
+from urllib.parse import parse_qs
 
 @app.route('/api/v1/status', methods=['POST'])
 def status():
