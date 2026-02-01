@@ -28,6 +28,9 @@ def init_db():
     conn.commit()
     conn.close()
 
+# CRITICAL: Initialize DB here so Gunicorn runs it on startup
+init_db()
+
 def decrypt_data(data):
     return cipher.decrypt(data.encode()).decode()
 
@@ -87,13 +90,16 @@ def results():
 
 @app.route('/admin/list', methods=['GET'])
 def list_agents():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    c = conn.cursor()
-    c.execute("SELECT * FROM agents")
-    rows = [dict(row) for row in c.fetchall()]
-    conn.close()
-    return jsonify(rows)
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        c = conn.cursor()
+        c.execute("SELECT * FROM agents")
+        rows = [dict(row) for row in c.fetchall()]
+        conn.close()
+        return jsonify(rows)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/admin/task', methods=['POST'])
 def add_task():
@@ -121,6 +127,6 @@ def get_results(agent_id):
     return "No new results."
 
 if __name__ == "__main__":
-    init_db() # Create DB if it doesn't exist
+    # Local testing fallback
     port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port)
